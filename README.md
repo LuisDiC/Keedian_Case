@@ -1,8 +1,8 @@
 # Site 01 — Remote management dashboard
 **Case study — IoT Engineer, Keedian**
 
-- **Repository:** `<your GitHub URL>`
-- **Live prototype:** `<your Vercel URL>`
+- **Repository:** https://github.com/LuisDiC/Keedian_Case
+- **Live prototype:** [`<your Vercel URL>`](https://keedian-case.vercel.app/)
 
 A navigable, single-site dashboard for a convenience store (1 electrical panel, 2 rooftop units, 1 walk-in cooler), built to answer one question in the first 10 seconds: **what does the remote operator do right now, and why?**
 
@@ -11,7 +11,7 @@ A navigable, single-site dashboard for a convenience store (1 electrical panel, 
 ## 1. How to run it locally
 
 ```bash
-git clone <your GitHub URL>
+git clone https://github.com/LuisDiC/Keedian_Case
 cd keedian-web
 npm install
 npm run dev        # http://localhost:5173
@@ -94,6 +94,8 @@ Example: *"Perishables at risk"* (cooler, critical, past 2h) = 60+15+20+0 = **95
 - What AI generated: e.g. scaffolding (Vite/Tailwind/Recharts setup), first drafts of the synthetic model and alarm engine, the dashboard layout.
 - What was my own decision: the indicators and information hierarchy in §2, the alarm thresholds and priority formula in §2.3, the assumptions in §3, which incidents to script into the data, what to leave out and why.
 - Anything I changed or rejected from the AI's first suggestion, and why.
+
+
 
 ## 6. What I'd add with more time
 - Per-equipment drill-down views (RTU detail with fan/cooling mode history, cooler detail with defrost log).

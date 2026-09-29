@@ -15,7 +15,7 @@ function ingest(t) {
     }
     now[asset] = p
   }
-  cooler.push({ t, v: s.cooler01.temp_f, defrost: s.cooler01.defrost, door: s.cooler01.door_open })
+  cooler.push({ t, v: s.cooler01.temp_f, defrost: s.cooler01.defrost, door: s.cooler01.door_open, fault: s.cooler01.fault })
   power.push({ t, kw: s.meter01.kw, exp: s.meter01.expected_kw })
   ;[s.rtu01, s.rtu02].forEach((r, i) => r.mode === 2 && rtu.push({ t, id: i + 1, d: r.delta_t_f }))
 }

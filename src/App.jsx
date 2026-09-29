@@ -41,12 +41,15 @@ export default function App() {
   const idx = (a, b) => { let k = 0, e = 0; D.power.forEach((p) => { if (p.t > a && p.t <= b) { k += p.kw; e += p.exp } }); return e ? (k / e) * 100 : 0 }
   const cur = idx(now - 30 * DAY, now), prev = idx(now - 60 * DAY, now - 30 * DAY)
   const worst = open[0], status = open.some((a) => a.severity === 'critical') ? ['ACTION NOW', 'bg-red-600'] : open.some((a) => ['major', 'warning'].includes(a.severity)) ? ['ATTENTION TODAY', 'bg-orange-500'] : open.length ? ['MINOR ISSUES', 'bg-sky-600'] : ['ALL CLEAR', 'bg-emerald-600']
-  const coolerData = bucket(c24, 5 * MIN, (a) => ({ v: avg(a, 'v'), defrost: max(a, 'defrost'), door: max(a, 'door') }))
+  const coolerData = bucket(c24, 5 * MIN, (a) => ({ v: avg(a, 'v'), defrost: max(a, 'defrost'), door: max(a, 'door'), fault: max(a, 'fault') }))
   const defrostSeg = segments(coolerData, 'defrost', 5 * MIN)
   const doorSeg = segments(coolerData, 'door', 5 * MIN)
+  const faultSeg = segments(coolerData, 'fault', 5 * MIN)
   const powerData = bucket(D.power.filter((p) => p.t > now - DAY), 15 * MIN, (a) => ({ kw: avg(a, 'kw'), exp: avg(a, 'exp') }))
   const rtuData = bucket(D.rtu.filter((p) => p.t > now - 30 * DAY), 12 * H, (a) => ({ rtu1: avg(a.filter((p) => p.id === 1).length ? a.filter((p) => p.id === 1) : [{ d: NaN }], 'd'), rtu2: avg(a.filter((p) => p.id === 2).length ? a.filter((p) => p.id === 2) : [{ d: NaN }], 'd') }))
   const coolerNow = D.now.cooler01?.temp_f
+  const critMajor = open.filter((a) => ['critical', 'major'].includes(a.severity))
+  const minorWarn = open.filter((a) => ['warning', 'minor'].includes(a.severity))
   const meterNow = D.now.meter01
   const branches = meterNow ? [
     { label: 'RTU 1', kw: meterNow.kw_rtu1, color: '#34d399' },
@@ -65,13 +68,16 @@ export default function App() {
 
       {tab === 'overview' ? <>
         <section className={`rounded-xl p-4 ${status[1]}`}>
-          <div className="text-xs font-bold tracking-widest">{status[0]}</div>
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="text-xs font-bold tracking-widest">{status[0]}</div>
+            <div className="text-xs opacity-90">{critMajor.length} critical/major · {minorWarn.length} warning/minor open</div>
+          </div>
           <div className="text-lg font-semibold mt-1">{worst ? `Attend first: ${worst.title}` : 'No open alarms'}</div>
           {worst && <div className="text-sm opacity-90">{worst.reason}</div>}
         </section>
 
         <section className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-          <Kpi label="Critical + major open" value={open.filter((a) => ['critical', 'major'].includes(a.severity)).length} sub={`${open.length} open in total`} tone="border-slate-800 bg-slate-900" />
+          <Kpi label="Critical + major open" value={critMajor.length} sub={critMajor.length === 0 ? (minorWarn.length ? `0 — ${minorWarn.length} lower-severity still open` : 'Nothing open') : `${open.length} open in total`} tone={critMajor.length ? 'border-red-600 bg-red-950' : 'border-slate-800 bg-slate-900'} />
           <Kpi label="Cooler above 41°F · 24 h" value={`${Math.round(mins)} min`} sub={mins >= 240 ? 'Food-safety limit (4 h) exceeded' : mins > 0 ? 'Product exposure in last 24 h' : 'No exposure'} tone={mins >= 120 ? 'border-red-600 bg-red-950' : mins > 0 ? 'border-orange-500 bg-orange-950' : 'border-slate-800 bg-slate-900'} />
           <Kpi label="Cooler now" value={`${coolerNow?.toFixed(1)}°F`} sub="Setpoint 36°F · limit 41°F" tone={coolerNow > 41 ? 'border-red-600 bg-red-950' : 'border-slate-800 bg-slate-900'} />
           <Kpi label="Energy vs baseline · 30 d" value={`${cur.toFixed(0)}%`} sub={`prev. 30 d: ${prev.toFixed(0)}% → ${cur > prev ? 'worse' : 'better'} (weather-adjusted)`} tone={cur > prev + 0.5 ? 'border-orange-500 bg-orange-950' : 'border-slate-800 bg-slate-900'} />
@@ -89,15 +95,17 @@ export default function App() {
         </section>
 
         <section className="grid lg:grid-cols-2 gap-3">
-          <Card title="Walk-in cooler · last 24 h (shaded = defrost cycle, red = door open)">
+          <Card title="Walk-in cooler · last 24 h (shaded = defrost, red = door open, purple = equipment fault)">
             <ResponsiveContainer><LineChart data={coolerData}>{axes(hm)}<YAxis domain={[30, 'auto']} stroke="#64748b" fontSize={11} unit="°" />
               {defrostSeg.map((s, i) => <ReferenceArea key={'d' + i} x1={s.x1} x2={s.x2} fill="#f59e0b" fillOpacity={0.18} ifOverflow="extendDomain" />)}
               {doorSeg.map((s, i) => <ReferenceArea key={'o' + i} x1={s.x1} x2={s.x2} fill="#ef4444" fillOpacity={0.25} ifOverflow="extendDomain" />)}
+              {faultSeg.map((s, i) => <ReferenceArea key={'f' + i} x1={s.x1} x2={s.x2} fill="#a855f7" fillOpacity={0.22} ifOverflow="extendDomain" />)}
               <ReferenceLine y={41} stroke="#ef4444" strokeDasharray="4 4" label={{ value: '41°F', fill: '#ef4444', fontSize: 11 }} />
               <Line dataKey="v" dot={false} stroke="#38bdf8" strokeWidth={2} isAnimationActive={false} /></LineChart></ResponsiveContainer>
-            <div className="flex gap-4 mt-2 text-[11px] text-slate-500">
+            <div className="flex flex-wrap gap-4 mt-2 text-[11px] text-slate-500">
               <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-sm inline-block" style={{ background: '#f59e0b', opacity: 0.5 }} />defrost cycle (4×/day)</span>
               <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-sm inline-block" style={{ background: '#ef4444', opacity: 0.5 }} />door open</span>
+              <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-sm inline-block" style={{ background: '#a855f7', opacity: 0.5 }} />compressor fault</span>
             </div>
           </Card>
           <Card title="Site power vs weather-adjusted baseline · last 24 h (kW)"
