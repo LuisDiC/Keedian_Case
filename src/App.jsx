@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { LineChart, Line, XAxis, YAxis, Tooltip, ReferenceLine, ResponsiveContainer, CartesianGrid, Legend } from 'recharts'
+import { LineChart, Line, XAxis, YAxis, Tooltip, ReferenceLine, ReferenceArea, ResponsiveContainer, CartesianGrid, Legend } from 'recharts'
 import * as D from './data.js'
 
 const SEV = { critical: 'bg-red-600', major: 'bg-orange-500', warning: 'bg-yellow-400 text-black', minor: 'bg-sky-600' }
@@ -8,11 +8,27 @@ const hm = (t) => new Date(t).toLocaleTimeString([], { hour: '2-digit', minute: 
 const md = (t) => new Date(t).toLocaleDateString([], { month: 'short', day: 'numeric' })
 const bucket = (arr, ms, f) => { const m = new Map(); arr.forEach((p) => { const k = Math.floor(p.t / ms) * ms; (m.get(k) || m.set(k, []).get(k)).push(p) }); return [...m].map(([t, a]) => ({ t, ...f(a) })) }
 const avg = (a, k) => a.reduce((s, p) => s + p[k], 0) / a.length
+const max = (a, k) => Math.max(...a.map((p) => p[k]))
+// contiguous runs where flag===1 in a time-bucketed series -> [{x1,x2}] for ReferenceArea shading
+const segments = (data, key, stepMs) => {
+  const out = []; let start = null
+  data.forEach((p, i) => {
+    if (p[key] && start === null) start = p.t
+    if ((!p[key] || i === data.length - 1) && start !== null) { out.push({ x1: start, x2: p[key] ? p.t + stepMs : p.t }); start = null }
+  })
+  return out
+}
 
 const Kpi = ({ label, value, sub, tone }) => (
   <div className={`rounded-xl p-4 border ${tone}`}><div className="text-xs uppercase tracking-wide text-slate-400">{label}</div>
     <div className="text-3xl font-semibold mt-1">{value}</div><div className="text-xs text-slate-400 mt-1">{sub}</div></div>)
-const Card = ({ title, children }) => (<div className="rounded-xl border border-slate-800 bg-slate-900 p-4"><h3 className="text-sm font-medium text-slate-300 mb-3">{title}</h3><div className="h-64">{children}</div></div>)
+const Card = ({ title, children, foot }) => (<div className="rounded-xl border border-slate-800 bg-slate-900 p-4"><h3 className="text-sm font-medium text-slate-300 mb-3">{title}</h3><div className="h-64">{children}</div>{foot}</div>)
+const Branch = ({ label, kw, total, color }) => (
+  <div className="flex items-center gap-2 text-xs">
+    <span className="w-24 text-slate-400 shrink-0">{label}</span>
+    <div className="flex-1 h-2 rounded bg-slate-800 overflow-hidden"><div className="h-full rounded" style={{ width: `${total ? Math.min(100, (kw / total) * 100) : 0}%`, background: color }} /></div>
+    <span className="w-16 text-right font-mono">{kw.toFixed(1)} kW</span>
+  </div>)
 const axes = (fmt) => [<CartesianGrid key="g" stroke="#1e293b" />, <XAxis key="x" dataKey="t" type="number" domain={['dataMin', 'dataMax']} tickFormatter={fmt} stroke="#64748b" fontSize={11} />, <Tooltip key="t" labelFormatter={fmt} contentStyle={{ background: '#0f172a', border: '1px solid #334155' }} formatter={(v) => (+v).toFixed(1)} />]
 
 export default function App() {
@@ -25,10 +41,20 @@ export default function App() {
   const idx = (a, b) => { let k = 0, e = 0; D.power.forEach((p) => { if (p.t > a && p.t <= b) { k += p.kw; e += p.exp } }); return e ? (k / e) * 100 : 0 }
   const cur = idx(now - 30 * DAY, now), prev = idx(now - 60 * DAY, now - 30 * DAY)
   const worst = open[0], status = open.some((a) => a.severity === 'critical') ? ['ACTION NOW', 'bg-red-600'] : open.some((a) => ['major', 'warning'].includes(a.severity)) ? ['ATTENTION TODAY', 'bg-orange-500'] : open.length ? ['MINOR ISSUES', 'bg-sky-600'] : ['ALL CLEAR', 'bg-emerald-600']
-  const coolerData = bucket(c24, 5 * MIN, (a) => ({ v: avg(a, 'v') }))
+  const coolerData = bucket(c24, 5 * MIN, (a) => ({ v: avg(a, 'v'), defrost: max(a, 'defrost'), door: max(a, 'door') }))
+  const defrostSeg = segments(coolerData, 'defrost', 5 * MIN)
+  const doorSeg = segments(coolerData, 'door', 5 * MIN)
   const powerData = bucket(D.power.filter((p) => p.t > now - DAY), 15 * MIN, (a) => ({ kw: avg(a, 'kw'), exp: avg(a, 'exp') }))
   const rtuData = bucket(D.rtu.filter((p) => p.t > now - 30 * DAY), 12 * H, (a) => ({ rtu1: avg(a.filter((p) => p.id === 1).length ? a.filter((p) => p.id === 1) : [{ d: NaN }], 'd'), rtu2: avg(a.filter((p) => p.id === 2).length ? a.filter((p) => p.id === 2) : [{ d: NaN }], 'd') }))
   const coolerNow = D.now.cooler01?.temp_f
+  const meterNow = D.now.meter01
+  const branches = meterNow ? [
+    { label: 'RTU 1', kw: meterNow.kw_rtu1, color: '#34d399' },
+    { label: 'RTU 2', kw: meterNow.kw_rtu2, color: '#f472b6' },
+    { label: 'Refrigeration', kw: meterNow.kw_cooler, color: '#38bdf8' },
+    { label: 'Lighting', kw: meterNow.kw_lighting, color: '#fbbf24' },
+    { label: 'Plug loads', kw: meterNow.kw_plug, color: '#a78bfa' },
+  ] : []
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 p-4 md:p-6 max-w-7xl mx-auto space-y-4">
@@ -63,12 +89,30 @@ export default function App() {
         </section>
 
         <section className="grid lg:grid-cols-2 gap-3">
-          <Card title="Walk-in cooler · last 24 h (defrost cycles, door and compressor events)"><ResponsiveContainer><LineChart data={coolerData}>{axes(hm)}<YAxis domain={[30, 'auto']} stroke="#64748b" fontSize={11} unit="°" /><ReferenceLine y={41} stroke="#ef4444" strokeDasharray="4 4" label={{ value: '41°F', fill: '#ef4444', fontSize: 11 }} /><Line dataKey="v" dot={false} stroke="#38bdf8" strokeWidth={2} isAnimationActive={false} /></LineChart></ResponsiveContainer></Card>
-          <Card title="Site power vs weather-adjusted baseline · last 24 h (kW)"><ResponsiveContainer><LineChart data={powerData}>{axes(hm)}<YAxis stroke="#64748b" fontSize={11} /><Legend /><Line name="actual" dataKey="kw" dot={false} stroke="#fb923c" strokeWidth={2} isAnimationActive={false} /><Line name="expected" dataKey="exp" dot={false} stroke="#94a3b8" strokeDasharray="5 5" isAnimationActive={false} /></LineChart></ResponsiveContainer></Card>
+          <Card title="Walk-in cooler · last 24 h (shaded = defrost cycle, red = door open)">
+            <ResponsiveContainer><LineChart data={coolerData}>{axes(hm)}<YAxis domain={[30, 'auto']} stroke="#64748b" fontSize={11} unit="°" />
+              {defrostSeg.map((s, i) => <ReferenceArea key={'d' + i} x1={s.x1} x2={s.x2} fill="#f59e0b" fillOpacity={0.18} ifOverflow="extendDomain" />)}
+              {doorSeg.map((s, i) => <ReferenceArea key={'o' + i} x1={s.x1} x2={s.x2} fill="#ef4444" fillOpacity={0.25} ifOverflow="extendDomain" />)}
+              <ReferenceLine y={41} stroke="#ef4444" strokeDasharray="4 4" label={{ value: '41°F', fill: '#ef4444', fontSize: 11 }} />
+              <Line dataKey="v" dot={false} stroke="#38bdf8" strokeWidth={2} isAnimationActive={false} /></LineChart></ResponsiveContainer>
+            <div className="flex gap-4 mt-2 text-[11px] text-slate-500">
+              <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-sm inline-block" style={{ background: '#f59e0b', opacity: 0.5 }} />defrost cycle (4×/day)</span>
+              <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-sm inline-block" style={{ background: '#ef4444', opacity: 0.5 }} />door open</span>
+            </div>
+          </Card>
+          <Card title="Site power vs weather-adjusted baseline · last 24 h (kW)"
+            foot={meterNow && (
+              <div className="mt-3 pt-3 border-t border-slate-800 space-y-1.5">
+                <div className="text-[11px] uppercase tracking-wide text-slate-500 mb-1">Current load breakdown — main panel branch circuits</div>
+                {branches.map((b) => <Branch key={b.label} label={b.label} kw={b.kw} total={meterNow.kw} color={b.color} />)}
+              </div>
+            )}>
+            <ResponsiveContainer><LineChart data={powerData}>{axes(hm)}<YAxis stroke="#64748b" fontSize={11} /><Legend /><Line name="actual" dataKey="kw" dot={false} stroke="#fb923c" strokeWidth={2} isAnimationActive={false} /><Line name="expected" dataKey="exp" dot={false} stroke="#94a3b8" strokeDasharray="5 5" isAnimationActive={false} /></LineChart></ResponsiveContainer>
+          </Card>
           <Card title="RTU cooling ΔT · 30 d — silent degradation (target ≥ 15°F)"><ResponsiveContainer><LineChart data={rtuData}>{axes(md)}<YAxis domain={[8, 24]} stroke="#64748b" fontSize={11} /><Legend /><ReferenceLine y={15} stroke="#ef4444" strokeDasharray="4 4" /><Line name="RTU 1" dataKey="rtu1" dot={false} stroke="#34d399" strokeWidth={2} connectNulls isAnimationActive={false} /><Line name="RTU 2" dataKey="rtu2" dot={false} stroke="#f472b6" strokeWidth={2} connectNulls isAnimationActive={false} /></LineChart></ResponsiveContainer></Card>
         </section></> :
         <section className="rounded-xl border border-slate-800 bg-slate-900 p-4 overflow-x-auto">
-          <table className="w-full text-sm"><thead className="text-left text-slate-400"><tr>{['Prio', 'Severity', 'Asset', 'Alarm', 'Source', 'Start', 'End'].map((h) => <th key={h} className="py-2 pr-3">{h}</th>)}</tr></thead>
+          <table className="w-full min-w-[640px] text-sm"><thead className="text-left text-slate-400"><tr>{['Prio', 'Severity', 'Asset', 'Alarm', 'Source', 'Start', 'End'].map((h) => <th key={h} className="py-2 pr-3">{h}</th>)}</tr></thead>
             <tbody>{[...D.alarms].filter((a) => a.startedAt > now - 30 * DAY).sort((a, b) => b.startedAt - a.startedAt).map((a, i) => (
               <tr key={i} className="border-t border-slate-800"><td className="py-2 pr-3">{a.priority}</td><td className="pr-3"><span className={`text-[10px] font-bold px-2 py-0.5 rounded ${SEV[a.severity]}`}>{a.severity}</span></td><td className="pr-3">{a.asset}</td><td className="pr-3">{a.title}</td><td className="pr-3">{a.source}</td><td className="pr-3 whitespace-nowrap">{md(a.startedAt)} {hm(a.startedAt)}</td><td className="whitespace-nowrap">{a.endedAt ? `${md(a.endedAt)} ${hm(a.endedAt)}` : 'ACTIVE'}</td></tr>))}</tbody></table>
         </section>}
