@@ -111,7 +111,7 @@ export default function App() {
         </section>
 
         <section className="grid lg:grid-cols-2 gap-3">
-          <Card title="Walk-in cooler · last 24 h (shaded = defrost, red = door open, purple = equipment fault)">
+          <Card title="Walk-in cooler · last 24 h ">
             <ResponsiveContainer><LineChart data={coolerData}>{axes(hm)}<YAxis domain={[30, 'auto']} stroke="#64748b" fontSize={11} unit="°" />
               {defrostSeg.map((s, i) => <ReferenceArea key={'d' + i} x1={s.x1} x2={s.x2} fill="#f59e0b" fillOpacity={0.18} ifOverflow="extendDomain" />)}
               {doorSeg.map((s, i) => <ReferenceArea key={'o' + i} x1={s.x1} x2={s.x2} fill="#ef4444" fillOpacity={0.25} ifOverflow="extendDomain" />)}
