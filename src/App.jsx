@@ -33,6 +33,8 @@ const axes = (fmt) => [<CartesianGrid key="g" stroke="#1e293b" />, <XAxis key="x
 
 export default function App() {
   const [, force] = useState(0); const [tab, setTab] = useState('overview')
+  const [acked, setAcked] = useState(() => new Set())
+  const toggleAck = (k) => setAcked((s) => { const n = new Set(s); n.has(k) ? n.delete(k) : n.add(k); return n })
   useEffect(() => { const i = setInterval(() => { D.tick(); force((x) => x + 1) }, 5000); return () => clearInterval(i) }, [])
   const now = Date.now()
   const open = D.alarms.filter((a) => !a.endedAt).sort((a, b) => b.priority - a.priority)
@@ -45,7 +47,7 @@ export default function App() {
   const defrostSeg = segments(coolerData, 'defrost', 5 * MIN)
   const doorSeg = segments(coolerData, 'door', 5 * MIN)
   const faultSeg = segments(coolerData, 'fault', 5 * MIN)
-  const powerData = bucket(D.power.filter((p) => p.t > now - DAY), 15 * MIN, (a) => ({ kw: avg(a, 'kw'), exp: avg(a, 'exp') }))
+  const powerData = bucket(D.power.filter((p) => p.t > now - DAY), 15 * MIN, (a) => ({ kw: avg(a, 'kw'), exp: avg(a, 'exp'), pf: avg(a, 'pf') }))
   const rtuData = bucket(D.rtu.filter((p) => p.t > now - 30 * DAY), 12 * H, (a) => ({ rtu1: avg(a.filter((p) => p.id === 1).length ? a.filter((p) => p.id === 1) : [{ d: NaN }], 'd'), rtu2: avg(a.filter((p) => p.id === 2).length ? a.filter((p) => p.id === 2) : [{ d: NaN }], 'd') }))
   const coolerNow = D.now.cooler01?.temp_f
   const critMajor = open.filter((a) => ['critical', 'major'].includes(a.severity))
@@ -74,24 +76,38 @@ export default function App() {
           </div>
           <div className="text-lg font-semibold mt-1">{worst ? `Attend first: ${worst.title}` : 'No open alarms'}</div>
           {worst && <div className="text-sm opacity-90">{worst.reason}</div>}
+          {worst?.actions?.length > 0 && <div className="text-sm font-medium mt-1.5">→ {worst.actions[0]}</div>}
         </section>
 
-        <section className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+        <section className="grid grid-cols-2 lg:grid-cols-6 gap-3">
           <Kpi label="Critical + major open" value={critMajor.length} sub={critMajor.length === 0 ? (minorWarn.length ? `0 — ${minorWarn.length} lower-severity still open` : 'Nothing open') : `${open.length} open in total`} tone={critMajor.length ? 'border-red-600 bg-red-950' : 'border-slate-800 bg-slate-900'} />
           <Kpi label="Cooler above 41°F · 24 h" value={`${Math.round(mins)} min`} sub={mins >= 240 ? 'Food-safety limit (4 h) exceeded' : mins > 0 ? 'Product exposure in last 24 h' : 'No exposure'} tone={mins >= 120 ? 'border-red-600 bg-red-950' : mins > 0 ? 'border-orange-500 bg-orange-950' : 'border-slate-800 bg-slate-900'} />
           <Kpi label="Cooler now" value={`${coolerNow?.toFixed(1)}°F`} sub="Setpoint 36°F · limit 41°F" tone={coolerNow > 41 ? 'border-red-600 bg-red-950' : 'border-slate-800 bg-slate-900'} />
+          <Kpi label="Site power now" value={`${meterNow?.kw.toFixed(1)} kW`} sub={`expected ${meterNow?.expected_kw.toFixed(1)} kW`} tone="border-slate-800 bg-slate-900" />
+          <Kpi label="Power factor now" value={meterNow?.power_factor.toFixed(2)} sub={meterNow?.power_factor < 0.85 ? 'Below 0.90 — utility penalty range' : meterNow?.power_factor < 0.9 ? 'Below utility target (0.90)' : 'Within utility target'} tone={meterNow?.power_factor < 0.85 ? 'border-red-600 bg-red-950' : meterNow?.power_factor < 0.9 ? 'border-orange-500 bg-orange-950' : 'border-slate-800 bg-slate-900'} />
           <Kpi label="Energy vs baseline · 30 d" value={`${cur.toFixed(0)}%`} sub={`prev. 30 d: ${prev.toFixed(0)}% → ${cur > prev ? 'worse' : 'better'} (weather-adjusted)`} tone={cur > prev + 0.5 ? 'border-orange-500 bg-orange-950' : 'border-slate-800 bg-slate-900'} />
         </section>
 
         <section className="rounded-xl border border-slate-800 bg-slate-900 p-4">
           <h2 className="text-sm font-medium text-slate-300 mb-3">Alarm queue — attend in this order</h2>
           {open.length === 0 && <p className="text-slate-400 text-sm">Nothing to do.</p>}
-          <ul className="divide-y divide-slate-800">{open.map((a) => (
-            <li key={a.code + a.asset} className="py-3 flex gap-3 items-start">
+          <ul className="divide-y divide-slate-800">{open.map((a) => { const k = a.code + a.asset; const ack = acked.has(k); return (
+            <li key={k} className={`py-3 flex gap-3 items-start ${ack ? 'opacity-60' : ''}`}>
               <div className="w-12 text-center"><div className="text-2xl font-bold">{a.priority}</div><div className="text-[10px] text-slate-500">PRIO</div></div>
               <div className="flex-1"><div className="flex flex-wrap gap-2 items-center"><span className={`text-[10px] font-bold px-2 py-0.5 rounded ${SEV[a.severity]}`}>{a.severity.toUpperCase()}</span>
-                <span className="font-medium">{a.title}</span><span className="text-xs text-slate-500">{a.asset} · {a.source === 'derived' ? 'derived by Keedian' : 'device alarm'} · open {dur(now - a.startedAt)}</span></div>
-                <p className="text-sm text-slate-400 mt-1">{a.reason}</p></div></li>))}</ul>
+                <span className="font-medium">{a.title}</span><span className="text-xs text-slate-500">{a.asset} · {a.source === 'derived' ? 'derived by Keedian' : 'device alarm'} · open {dur(now - a.startedAt)}</span>
+                {ack && <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-slate-700 text-slate-300">✓ ACKNOWLEDGED</span>}</div>
+                <p className="text-sm text-slate-400 mt-1">{a.reason}</p>
+                {a.actions?.length > 0 && (
+                  <div className="mt-2">
+                    <div className="text-[10px] uppercase tracking-wide text-slate-500">Suggested actions</div>
+                    <ul className="space-y-1 mt-1">{a.actions.map((act, i) => (
+                      <li key={i} className="text-xs text-slate-300 flex gap-1.5"><span className="text-slate-600 shrink-0">{i + 1}.</span><span>{act}</span></li>))}</ul>
+                  </div>
+                )}</div>
+              <button onClick={() => toggleAck(k)} className={`text-xs px-3 py-1.5 rounded-lg shrink-0 ${ack ? 'bg-slate-800 text-slate-400' : 'bg-slate-700 hover:bg-slate-600'}`}>{ack ? 'Unacknowledge' : 'Acknowledge'}</button>
+            </li>)})}</ul>
+          {open.length > 0 && <p className="text-[11px] text-slate-500 mt-3">Acknowledge is a local demo only — not persisted or shared. In production this writes to <code>alarms.acknowledged_by/at</code> and syncs to every connected dashboard over MQTT (see README).</p>}
         </section>
 
         <section className="grid lg:grid-cols-2 gap-3">
@@ -118,12 +134,25 @@ export default function App() {
             <ResponsiveContainer><LineChart data={powerData}>{axes(hm)}<YAxis stroke="#64748b" fontSize={11} /><Legend /><Line name="actual" dataKey="kw" dot={false} stroke="#fb923c" strokeWidth={2} isAnimationActive={false} /><Line name="expected" dataKey="exp" dot={false} stroke="#94a3b8" strokeDasharray="5 5" isAnimationActive={false} /></LineChart></ResponsiveContainer>
           </Card>
           <Card title="RTU cooling ΔT · 30 d — silent degradation (target ≥ 15°F)"><ResponsiveContainer><LineChart data={rtuData}>{axes(md)}<YAxis domain={[8, 24]} stroke="#64748b" fontSize={11} /><Legend /><ReferenceLine y={15} stroke="#ef4444" strokeDasharray="4 4" /><Line name="RTU 1" dataKey="rtu1" dot={false} stroke="#34d399" strokeWidth={2} connectNulls isAnimationActive={false} /><Line name="RTU 2" dataKey="rtu2" dot={false} stroke="#f472b6" strokeWidth={2} connectNulls isAnimationActive={false} /></LineChart></ResponsiveContainer></Card>
+          <Card title="Power factor · last 24 h (dashed = utility target 0.90)"><ResponsiveContainer><LineChart data={powerData}>{axes(hm)}<YAxis domain={[0.6, 1]} stroke="#64748b" fontSize={11} /><ReferenceLine y={0.9} stroke="#f59e0b" strokeDasharray="4 4" label={{ value: '0.90', fill: '#f59e0b', fontSize: 11 }} /><Line dataKey="pf" name="power factor" dot={false} stroke="#22d3ee" strokeWidth={2} isAnimationActive={false} /></LineChart></ResponsiveContainer>
+            <p className="text-[11px] text-slate-500 mt-2">Drops when both RTU compressors run at once (induction-motor lag); recovers during defrost (resistive load) or when fewer motors are on. Many utilities charge a penalty below 0.90.</p>
+          </Card>
         </section></> :
-        <section className="rounded-xl border border-slate-800 bg-slate-900 p-4 overflow-x-auto">
-          <table className="w-full min-w-[640px] text-sm"><thead className="text-left text-slate-400"><tr>{['Prio', 'Severity', 'Asset', 'Alarm', 'Source', 'Start', 'End'].map((h) => <th key={h} className="py-2 pr-3">{h}</th>)}</tr></thead>
-            <tbody>{[...D.alarms].filter((a) => a.startedAt > now - 30 * DAY).sort((a, b) => b.startedAt - a.startedAt).map((a, i) => (
-              <tr key={i} className="border-t border-slate-800"><td className="py-2 pr-3">{a.priority}</td><td className="pr-3"><span className={`text-[10px] font-bold px-2 py-0.5 rounded ${SEV[a.severity]}`}>{a.severity}</span></td><td className="pr-3">{a.asset}</td><td className="pr-3">{a.title}</td><td className="pr-3">{a.source}</td><td className="pr-3 whitespace-nowrap">{md(a.startedAt)} {hm(a.startedAt)}</td><td className="whitespace-nowrap">{a.endedAt ? `${md(a.endedAt)} ${hm(a.endedAt)}` : 'ACTIVE'}</td></tr>))}</tbody></table>
-        </section>}
+        <>
+          <section className="rounded-xl border border-amber-700/50 bg-slate-900 p-4 overflow-x-auto">
+            <h2 className="text-sm font-medium text-amber-400 mb-3">Currently open ({open.length}) — same order as the queue on Overview</h2>
+            {open.length === 0 ? <p className="text-slate-400 text-sm">Nothing open.</p> :
+            <table className="w-full min-w-[640px] text-sm"><thead className="text-left text-slate-400"><tr>{['Prio', 'Severity', 'Asset', 'Alarm', 'Source', 'Open for'].map((h) => <th key={h} className="py-2 pr-3">{h}</th>)}</tr></thead>
+              <tbody>{open.map((a, i) => (
+                <tr key={i} className="border-t border-slate-800 bg-amber-950/20"><td className="py-2 pr-3">{a.priority}</td><td className="pr-3"><span className={`text-[10px] font-bold px-2 py-0.5 rounded ${SEV[a.severity]}`}>{a.severity}</span></td><td className="pr-3">{a.asset}</td><td className="pr-3">{a.title}</td><td className="pr-3">{a.source}</td><td className="whitespace-nowrap">{dur(now - a.startedAt)}</td></tr>))}</tbody></table>}
+          </section>
+          <section className="rounded-xl border border-slate-800 bg-slate-900 p-4 overflow-x-auto">
+            <h2 className="text-sm font-medium text-slate-300 mb-3">Resolved — last 30 days</h2>
+            <table className="w-full min-w-[640px] text-sm"><thead className="text-left text-slate-400"><tr>{['Prio', 'Severity', 'Asset', 'Alarm', 'Source', 'Start', 'End'].map((h) => <th key={h} className="py-2 pr-3">{h}</th>)}</tr></thead>
+              <tbody>{[...D.alarms].filter((a) => a.endedAt && a.startedAt > now - 30 * DAY).sort((a, b) => b.endedAt - a.endedAt).map((a, i) => (
+                <tr key={i} className="border-t border-slate-800"><td className="py-2 pr-3">{a.priority}</td><td className="pr-3"><span className={`text-[10px] font-bold px-2 py-0.5 rounded ${SEV[a.severity]}`}>{a.severity}</span></td><td className="pr-3">{a.asset}</td><td className="pr-3">{a.title}</td><td className="pr-3">{a.source}</td><td className="pr-3 whitespace-nowrap">{md(a.startedAt)} {hm(a.startedAt)}</td><td className="whitespace-nowrap">{md(a.endedAt)} {hm(a.endedAt)}</td></tr>))}</tbody></table>
+          </section>
+        </>}
     </div>)
 }
 const { MIN, DAY, H } = { MIN: 6e4, DAY: 864e5, H: 36e5 }

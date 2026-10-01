@@ -131,11 +131,21 @@ function sample(t, A) {
   const avg = (id) => { const d = demandFor(w.oat, tr, open, id); return d * (RTU_COOL_KW + RTU_FAN_KW) + (1 - d) * base; };
   const coolerAvg = 0.4 + 3.1 * (10 / 22) * (1 - 100 / 1440) + 2.8 * (100 / 1440);
   const expected = light + (2.0 + 4.5 * tr) + avg(1) + avg(2) + coolerAvg;
+  // Power factor: induction-motor compressors run lagging (~0.80-0.83), fan-only motors better (~0.90),
+  // resistive defrost heater near unity (~0.98), lighting/plug (LED drivers, electronics) ~0.95-0.97.
+  // Site PF is the kW-weighted blend of whatever branches are actually drawing right now (kVA sums, not kW).
+  const pfRtu = (mode) => (mode === 2 ? 0.83 : mode === 1 ? 0.9 : 0.95);
+  const pfCooler = c.payload.compressor ? 0.8 : c.payload.defrost ? 0.98 : 0.92;
+  const branches = [
+    [light, 0.95], [plug, 0.97], [r1.kw, pfRtu(r1.payload.mode)], [r2.kw, pfRtu(r2.payload.mode)], [c.kw, pfCooler],
+  ];
+  const kva = branches.reduce((s, [kw, pf]) => s + kw / pf, 0);
+  const pf = clamp((total / Math.max(kva, 0.01)) * (1 + vnoise(t, 73) * 0.006), 0.6, 1);
   return {
     weather01: { ts: t, oat_f: w.oat, rh_pct: w.rh },
     meter01: {
       ts: t, kw: total, expected_kw: expected, kw_rtu1: r1.kw, kw_rtu2: r2.kw, kw_cooler: c.kw,
-      kw_lighting: light, kw_plug: plug, voltage_v: 208 + vnoise(t, 72) * 1.5,
+      kw_lighting: light, kw_plug: plug, voltage_v: 208 + vnoise(t, 72) * 1.5, power_factor: pf,
     },
     rtu01: r1.payload, rtu02: r2.payload, cooler01: c.payload,
   };

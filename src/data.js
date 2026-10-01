@@ -10,13 +10,13 @@ function ingest(t) {
     for (const o of step(st, asset, p)) {
       const k = o.code + o.asset
       if (o.op === 'open') { byKey[k] = { ...o, endedAt: null }; alarms.push(byKey[k]) }
-      else if (o.op === 'update' && byKey[k]) Object.assign(byKey[k], { severity: o.severity, priority: o.priority, reason: o.reason, title: o.title })
+      else if (o.op === 'update' && byKey[k]) Object.assign(byKey[k], { severity: o.severity, priority: o.priority, reason: o.reason, title: o.title, actions: o.actions })
       else if (o.op === 'close' && byKey[k]) { byKey[k].endedAt = o.at; delete byKey[k] }
     }
     now[asset] = p
   }
   cooler.push({ t, v: s.cooler01.temp_f, defrost: s.cooler01.defrost, door: s.cooler01.door_open, fault: s.cooler01.fault })
-  power.push({ t, kw: s.meter01.kw, exp: s.meter01.expected_kw })
+  power.push({ t, kw: s.meter01.kw, exp: s.meter01.expected_kw, pf: s.meter01.power_factor })
   ;[s.rtu01, s.rtu02].forEach((r, i) => r.mode === 2 && rtu.push({ t, id: i + 1, d: r.delta_t_f }))
 }
 for (let t = A - 60 * DAY; t <= Date.now(); t += 5 * MIN) ingest(t)

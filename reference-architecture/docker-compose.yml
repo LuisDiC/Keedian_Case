@@ -1,0 +1,80 @@
+# Site 01 — production reference architecture (EXAMPLE ONLY)
+#
+# Do not run this as a prerequisite for the dashboard: the
+# dashboard is a static site (see repo root README, "How to run it locally").
+#
+# It also isn't meant to `docker compose up` as-is: the `ingestion` service below builds from
+# ./ingestion, which isn't included (only this compose file and .env.example are, on purpose —
+# see README §7). Treat this as an architecture sketch to discuss, not a second working deliverable.
+#
+#   cp .env.example .env   # then fill in real values if you ever do build this out
+
+name: keedian-site01-reference
+
+services:
+  mosquitto:                       # MQTT broker: the gateway-to-cloud hop a real site controller publishes to
+    image: eclipse-mosquitto:2.0
+    restart: unless-stopped
+    ports: ["127.0.0.1:1883:1883"]
+    volumes:
+      - mosquitto-data:/mosquitto/data
+    # A real deployment would mount a mosquitto.conf here (listener, auth, persistence).
+
+  timescaledb:                     # One DB for both jobs: a hypertable for telemetry, a plain table for alarms
+    image: timescale/timescaledb:latest-pg16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    volumes:
+      - timescale-data:/var/lib/postgresql/data
+      # A real deployment would mount an init script here to run:
+      #   CREATE EXTENSION IF NOT EXISTS timescaledb;
+      #   SELECT create_hypertable('telemetry', 'ts');
+      # plus the `alarms` table (code, asset, source, severity, title, started_at, ended_at,
+      # priority, reason, details jsonb, acknowledged_by, acknowledged_at — see README §2.4).
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    ports: ["127.0.0.1:5432:5432"]
+
+  ingestion:                       # Node service: simulator + alarm engine (reuses src/sim/*.js from the main app)
+    build: ./ingestion             # NOT included in this repo — see the note at the top of this file
+    restart: unless-stopped
+    environment:
+      MQTT_URL: mqtt://mosquitto:1883
+      PGHOST: timescaledb
+      PGPORT: 5432
+      PGUSER: ${POSTGRES_USER}
+      PGPASSWORD: ${POSTGRES_PASSWORD}
+      PGDATABASE: ${POSTGRES_DB}
+      SITE_ID: ${SITE_ID}
+    depends_on:
+      mosquitto: { condition: service_started }
+      timescaledb: { condition: service_healthy }
+    # Role: publish simulated (or real, once wired to a gateway) telemetry to MQTT, run
+    # src/sim/engine.js against it, and write both telemetry and alarm events to TimescaleDB.
+    # With real devices, this is the service that gets swapped for an actual MQTT ingestion
+    # worker — the alarm-engine half stays the same since it's pure functions of telemetry.
+
+  grafana:                         # Ops-facing dashboards over the same database, for shift leads/techs
+    image: grafana/grafana:11.4.0
+    restart: unless-stopped
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD}
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
+    volumes:
+      - grafana-data:/var/lib/grafana
+      # A real deployment would mount provisioned datasources + dashboards here.
+    ports: ["127.0.0.1:3000:3000"]
+    depends_on:
+      timescaledb: { condition: service_healthy }
+
+volumes:
+  mosquitto-data:
+  timescale-data:
+  grafana-data:
